@@ -35,13 +35,6 @@ def clasificar(trama):
         return "Trama invalida"
  
     fc0     = raw[0]
-    # El primer byte del Frame Control trae el tipo y el subtipo
-    # mezclados en los mismos bits. Para separarlos:
-    #   >> 2  recorre el byte 2 posiciones a la derecha (descarta los
-    #         2 bits menos significativos, que son la version del protocolo)
-    #   & 0x03  se queda solo con los 2 bits que indican el tipo
-    #   >> 4  recorre el byte 4 posiciones (deja solo los 4 bits altos)
-    #   & 0x0F  se queda con esos 4 bits, que indican el subtipo
     tipo    = (fc0 >> 2) & 0x03
     subtipo = (fc0 >> 4) & 0x0F
  
