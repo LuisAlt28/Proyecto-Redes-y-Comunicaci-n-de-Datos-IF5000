@@ -1,5 +1,5 @@
 """
-Grupo 2 - Capa de Enlace inalambrica (IEEE 802.11)
+
 COMPONENTE 1 - Captura y observacion de trafico real.
  
 Carga una captura publica reconocida (Network_Join_Nokia_Mobile.pcap,
