@@ -1,5 +1,4 @@
 """
-
 COMPONENTE 1 - Captura y observacion de trafico real.
  
 Carga una captura publica reconocida (Network_Join_Nokia_Mobile.pcap,
