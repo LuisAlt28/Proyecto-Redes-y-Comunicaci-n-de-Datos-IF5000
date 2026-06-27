@@ -2,17 +2,14 @@
 COMPONENTE 3 - Deteccion de un deauthentication flood.
 
 El detector:
-
   1) Lee el .pcap e identifica las deauth leyendo los BITS del Frame
      Control a mano (mismo enfoque de bajo nivel de modulo_b), NO con
      el disector de alto nivel de scapy.
   2) Cuenta deauth por VENTANA de tiempo y marca como ataque la ventana
      cuya cuenta supera un UMBRAL.
   3) Compara contra ground_truth.csv -> matriz de confusion y metricas
-     honestas (TPR, FPR, precision, exactitud, F1, latencia de deteccion).
-  4) Barre el umbral para mostrar el compromiso TPR/FPR y justificar la
-     eleccion final.
-
+     honestas (TPR, FPR, latencia de deteccion).
+  4) Se comparan dos umbrales para mostrar el impacto de la eleccion.
 """
 
 import csv
@@ -23,8 +20,9 @@ from scapy.all import rdpcap, RadioTap
 ARCHIVO_PCAP = "escenario_deauth.pcap"
 ARCHIVO_GT   = "ground_truth.csv"
 
-VENTANA_S    = 1.0    
-UMBRAL       = 10     
+VENTANA_S    = 1.0
+UMBRAL_1     = 1    # umbral bajo: detecta todo pero genera falsas alarmas
+UMBRAL_2     = 10   # umbral elegido: deteccion precisa sin falsas alarmas
 # ========================================================
 
 
@@ -46,8 +44,11 @@ def es_deauth_bajo_nivel(trama):
         return False
 
     fc0     = raw[0]
-   
-    tipo    = (fc0 >> 2) & 0x03   
+    # Mismo calculo que en componente_2: el primer byte trae el
+    # tipo y el subtipo mezclados en sus bits.
+    #   >> 2 & 0x03  se queda con el tipo (0=Gestion)
+    #   >> 4 & 0x0F  se queda con el subtipo (12 = Deauthentication)
+    tipo    = (fc0 >> 2) & 0x03
     subtipo = (fc0 >> 4) & 0x0F
 
     return tipo == 0 and subtipo == 12
@@ -97,7 +98,7 @@ def evaluar(cuentas, gt, umbral):
     ground-truth. Devuelve dict con la matriz de confusion y metricas.
     """
     VP = FP = VN = FN = 0
-    primera_alarma_correcta = None  # indice de ventana del 1er VP
+    primera_alarma_correcta = None
     for i, (c, real) in enumerate(zip(cuentas, gt)):
         pred = c >= umbral
         if pred and real:
@@ -111,24 +112,43 @@ def evaluar(cuentas, gt, umbral):
         else:
             VN += 1
 
-    tpr       = VP / (VP + FN) if (VP + FN) else 0.0   # recall / sensibilidad
-    fpr       = FP / (FP + VN) if (FP + VN) else 0.0
-    precision = VP / (VP + FP) if (VP + FP) else 0.0
-    exactitud = (VP + VN) / (VP + VN + FP + FN)
-    f1        = (2 * precision * tpr / (precision + tpr)) if (precision + tpr) else 0.0
+    tpr = VP / (VP + FN) if (VP + FN) else 0.0
+    fpr = FP / (FP + VN) if (FP + VN) else 0.0
 
     return {
         "VP": VP, "FP": FP, "VN": VN, "FN": FN,
-        "tpr": tpr, "fpr": fpr, "precision": precision,
-        "exactitud": exactitud, "f1": f1,
+        "tpr": tpr, "fpr": fpr,
         "primera_alarma": primera_alarma_correcta,
     }
+
+
+def mostrar_deteccion(m, umbral, onset=15.0):
+    """Imprime los resultados de una deteccion con un umbral dado."""
+    if m["primera_alarma"] is not None:
+        t_alarma = m["primera_alarma"] * VENTANA_S
+        latencia = max(0.0, t_alarma - onset)
+    else:
+        t_alarma = None
+        latencia = None
+
+    print("=" * 60)
+    print(f"DETECCION  (ventana={VENTANA_S:.0f}s, umbral={umbral} deauth/ventana)")
+    print("=" * 60)
+    print(f"  Verdaderos Positivos (VP): {m['VP']:>3}")
+    print(f"  Falsos Positivos     (FP): {m['FP']:>3}")
+    print(f"  Verdaderos Negativos (VN): {m['VN']:>3}")
+    print(f"  Falsos Negativos     (FN): {m['FN']:>3}")
+    print(f"  ---")
+    print(f"  TPR / Recall  : {m['tpr']:.3f}")
+    print(f"  FPR           : {m['fpr']:.3f}")
+    if latencia is not None:
+        print(f"  Latencia de deteccion: {latencia:.2f} s "
+              f"(alarma en t={t_alarma:.0f}s, ataque inicia en t={onset:.0f}s)")
 
 
 def main():
     t_min, tiempos, n_paquetes = cargar_tiempos_deauth(ARCHIVO_PCAP)
 
-   
     paquetes = rdpcap(ARCHIVO_PCAP)
     t_fin = max(float(p.time) for p in paquetes)
     n_ventanas = int(math.ceil((t_fin - t_min) / VENTANA_S)) + 1
@@ -138,51 +158,21 @@ def main():
 
     # ---------- Validacion contra Wireshark ----------
     print("=" * 60)
-    print("VALIDACION DE CONTEO ")
+    print("VALIDACION DE CONTEO")
     print("=" * 60)
     print(f"  Paquetes totales en pcap : {n_paquetes}")
     print(f"  Deauth detectadas (s.12) : {len(tiempos)}")
     print(f"  (en Wireshark: filtro 'wlan.fc.type_subtype == 12')")
-
-    # ---------- Deteccion con el umbral elegido ----------
-    m = evaluar(cuentas, gt, UMBRAL)
-    onset = 15.0  # inicio del ataque 
-    if m["primera_alarma"] is not None:
-        t_alarma = m["primera_alarma"] * VENTANA_S
-        latencia = max(0.0, t_alarma - onset)
-    else:
-        t_alarma = None
-        latencia = None
-
     print()
-    print("=" * 60)
-    print(f"DETECCION  (ventana={VENTANA_S:.0f}s, umbral={UMBRAL} deauth/ventana)")
-    print("=" * 60)
-    print(f"  Verdaderos Positivos (VP): {m['VP']:>3}")
-    print(f"  Falsos Positivos     (FP): {m['FP']:>3}")
-    print(f"  Verdaderos Negativos (VN): {m['VN']:>3}")
-    print(f"  Falsos Negativos     (FN): {m['FN']:>3}")
-    print(f"  ---")
-    print(f"  TPR / Recall  : {m['tpr']:.3f}")
-    print(f"  FPR           : {m['fpr']:.3f}")
-    print(f"  Precision     : {m['precision']:.3f}")
-    print(f"  Exactitud     : {m['exactitud']:.3f}")
-    print(f"  F1            : {m['f1']:.3f}")
-    if latencia is not None:
-        print(f"  Latencia de deteccion: {latencia:.2f} s "
-              f"(alarma en t={t_alarma:.0f}s, ataque inicia en t={onset:.0f}s)")
 
-    # ---------- Barrido de umbral ----------
+    # ---------- Deteccion con umbral bajo (genera falsas alarmas) ----------
+    m1 = evaluar(cuentas, gt, UMBRAL_1)
+    mostrar_deteccion(m1, UMBRAL_1)
     print()
-    print("=" * 60)
-    print("BARRIDO DE UMBRAL ")
-    print("=" * 60)
-    print(f"  {'umbral':>6} | {'VP':>3} {'FP':>3} {'FN':>3} | {'TPR':>5} {'FPR':>5} {'F1':>5}")
-    print("  " + "-" * 46)
-    for u in [1, 2, 3, 5, 10, 25, 50, 100, 150]:
-        r = evaluar(cuentas, gt, u)
-        print(f"  {u:>6} | {r['VP']:>3} {r['FP']:>3} {r['FN']:>3} | "
-              f"{r['tpr']:.2f}  {r['fpr']:.2f}  {r['f1']:.2f}")
+
+    # ---------- Deteccion con umbral elegido (precisa) ----------
+    m2 = evaluar(cuentas, gt, UMBRAL_2)
+    mostrar_deteccion(m2, UMBRAL_2)
 
 
 if __name__ == "__main__":
