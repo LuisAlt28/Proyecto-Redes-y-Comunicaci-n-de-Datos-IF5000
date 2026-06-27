@@ -7,6 +7,7 @@ Análisis, implementación de bajo nivel y detección de ataques sobre el están
 
 ## Descripción general
 
+
 | Componente | Archivo | Propósito |
 |---|---|---|
 | 1 | `componente_1.py` | Observación de tráfico real — clasificación de tramas por Frame Control |

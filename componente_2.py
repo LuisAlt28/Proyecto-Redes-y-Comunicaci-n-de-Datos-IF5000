@@ -141,6 +141,7 @@ def main():
         trama = encontradas.get(etapa[2])
         if trama is not None:
             parsear_trama(trama, etapa[2])
+            
 
     faltantes = [e[2] for e in ETAPAS if e[2] not in encontradas]
     if faltantes:
